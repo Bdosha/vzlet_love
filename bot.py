@@ -1,7 +1,6 @@
 import asyncio
-import logging
 
-from aiogram import F, Bot, Dispatcher
+from aiogram import F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -17,34 +16,7 @@ from aiogram.types import (
 
 import database
 import postcard
-from config import BOT_TOKEN, CONFIRM_CHAT, CHANNEL, ADMINS, IS_HOLIDAY
-from config import fmt_user, fmt_text
-
-
-def _setup_logging() -> None:
-    fmt = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-
-    fh = logging.FileHandler("bot.log", mode="a", encoding="utf-8")
-    fh.setFormatter(fmt)
-    root.addHandler(fh)
-
-    ch = logging.StreamHandler()
-    ch.setFormatter(fmt)
-    root.addHandler(ch)
-
-
-_setup_logging()
-logger = logging.getLogger(__name__)
-
-bot = Bot(BOT_TOKEN)
-dp = Dispatcher()
-
-BAN_TEXT = 'Вы были заблокированы в боте. Для разблокировки обращайтесь к @bdosha06'
+from config import fmt_user, fmt_text, logger, dp, CONFIRM_CHAT, CHANNEL, ADMINS, IS_HOLIDAY, BAN_TEXT, bot
 
 
 class Form(StatesGroup):

@@ -1,3 +1,7 @@
+import logging
+from aiogram.types import User
+
+from aiogram import Bot, Dispatcher
 from decouple import config
 
 BOT_TOKEN = config("BOT_TOKEN", cast=str)
@@ -7,7 +11,29 @@ CHANNEL = config('CHANNEL', cast=int)
 ADMINS = [int(i) for i in config('ADMINS').split(',')]
 IS_HOLIDAY = config('IS_HOLIDAY', cast=bool, default=False)
 
-from aiogram.types import User
+LOG_FMT = logging.Formatter(
+    "%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+_fh = logging.FileHandler("bot.log", mode="a", encoding="utf-8")
+_fh.setFormatter(LOG_FMT)
+
+_ch = logging.StreamHandler()
+_ch.setFormatter(LOG_FMT)
+
+logging.basicConfig(level=logging.WARNING, handlers=[_ch])
+
+logger = logging.getLogger("love")
+logger.setLevel(logging.INFO)
+logger.addHandler(_fh)
+logger.addHandler(_ch)
+logger.propagate = False
+
+BAN_TEXT = 'Вы были заблокированы в боте. Для разблокировки обращайтесь к @bdosha06'
+
+bot = Bot(BOT_TOKEN)
+dp = Dispatcher()
 
 
 def fmt_user(user: User) -> str:

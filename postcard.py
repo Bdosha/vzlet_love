@@ -1,4 +1,3 @@
-import logging
 from io import BytesIO
 
 from aiogram import Dispatcher, F
@@ -14,9 +13,7 @@ from aiogram.types import (
 from PIL import Image, ImageDraw, ImageFont
 
 import database
-from config import fmt_user, fmt_text
-
-logger = logging.getLogger(__name__)
+from config import fmt_user, fmt_text, logger
 
 
 def _wrap_text(text: str, max_chars: int = 27, max_lines: int = 5) -> str:

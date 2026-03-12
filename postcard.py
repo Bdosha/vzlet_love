@@ -1,3 +1,6 @@
+import logging
+from io import BytesIO
+
 from aiogram import Dispatcher, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -8,11 +11,12 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
+from PIL import Image, ImageDraw, ImageFont
 
 import database
-from io import BytesIO
+from config import fmt_user, fmt_text
 
-from PIL import Image, ImageDraw, ImageFont
+logger = logging.getLogger(__name__)
 
 
 def _wrap_text(text: str, max_chars: int = 27, max_lines: int = 5) -> str:
@@ -57,6 +61,7 @@ async def _register_user(use: CallbackQuery | Message) -> None:
 
 async def make_picture(message: Message):
     await _register_user(message)
+    logger.info('[ОТКРЫТКА] начало: %s', fmt_user(message.from_user))
     chose_color = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text='🧡 Оранжевый', callback_data='orange')],
@@ -69,6 +74,7 @@ async def make_picture(message: Message):
 
 async def choose_color(callback: CallbackQuery, state: FSMContext):
     await _register_user(callback)
+    logger.info('[ОТКРЫТКА] цвет=%s | %s', callback.data, fmt_user(callback.from_user))
     await state.update_data(color=callback.data)
     await callback.answer()
     await callback.message.edit_text('Напиши текст для открытки')
@@ -99,6 +105,14 @@ async def getter_of_picture(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     await state.clear()
+    logger.info(
+        '[ОТКРЫТКА→ГОТОВО] автор: %s | цвет=%s | текст="%s" | от="%s" | кому="%s"',
+        fmt_user(message.from_user),
+        data['color'],
+        fmt_text(data['text']),
+        data['p_from'],
+        message.text,
+    )
     buf = create_picture(data['color'], data['text'], data['p_from'], message.text)
     photo = BufferedInputFile(buf.read(), filename='postcard.png')
     await message.answer('А вот и открытка!')

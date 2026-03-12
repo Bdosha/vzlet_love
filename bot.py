@@ -18,8 +18,27 @@ from aiogram.types import (
 import database
 import postcard
 from config import BOT_TOKEN, CONFIRM_CHAT, CHANNEL, ADMINS, IS_HOLIDAY
+from config import fmt_user, fmt_text
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+def _setup_logging() -> None:
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+
+    fh = logging.FileHandler("bot.log", mode="a", encoding="utf-8")
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    root.addHandler(ch)
+
+
+_setup_logging()
 logger = logging.getLogger(__name__)
 
 bot = Bot(BOT_TOKEN)
@@ -42,9 +61,11 @@ async def register_user(use: CallbackQuery | Message) -> None:
 @dp.message(Command('log'))
 async def cmd_log(message: Message):
     if message.from_user.id not in ADMINS:
+        logger.warning('[LOG] отказ в доступе: %s', fmt_user(message.from_user))
         return
+    logger.info('[LOG] запрос логов: %s', fmt_user(message.from_user))
     try:
-        await message.answer_document(FSInputFile(path='nohup.out'))
+        await message.answer_document(FSInputFile(path="bot.log"))
     except Exception:
         await message.answer('Лог-файл пустой или не найден')
     database.export_sheet()
@@ -54,10 +75,12 @@ async def cmd_log(message: Message):
 @dp.message(Command('unban'))
 async def cmd_unban(message: Message):
     if message.from_user.id not in ADMINS:
+        logger.warning('[РАЗБАН] отказ в доступе: %s', fmt_user(message.from_user))
         return
     try:
         user_id = int(message.text.split()[-1])
         await database.unban(user_id)
+        logger.info('[РАЗБАН] user_id=%d | разбанил: %s', user_id, fmt_user(message.from_user))
         await message.answer('Разбанен')
     except ValueError:
         await message.answer('Укажите ID: /unban 123456789')
@@ -69,8 +92,10 @@ async def cmd_unban(message: Message):
 async def cmd_start(message: Message, state: FSMContext):
     await register_user(message)
     if await database.check_ban(message.from_user.id):
+        logger.warning('[START] заблокированный пользователь: %s', fmt_user(message.from_user))
         await message.answer(BAN_TEXT)
         return
+    logger.info('[START] %s', fmt_user(message.from_user))
     await state.clear()
     keyboard = [[KeyboardButton(text='💌 Написать в канал')]]
     if IS_HOLIDAY:
@@ -90,6 +115,7 @@ async def cmd_start(message: Message, state: FSMContext):
 @dp.message(F.text == '💌 Написать в канал')
 async def make_post(message: Message, state: FSMContext):
     await register_user(message)
+    logger.info('[ПОСТ] начало составления: %s', fmt_user(message.from_user))
     await state.set_state(Form.send_to_chat)
     await message.answer('Напиши сообщение')
 
@@ -98,6 +124,7 @@ async def make_post(message: Message, state: FSMContext):
 async def receive_post(message: Message, state: FSMContext):
     await register_user(message)
     if await database.check_ban(message.from_user.id):
+        logger.warning('[ПОСТ] заблокированный пользователь: %s', fmt_user(message.from_user))
         await message.answer(BAN_TEXT)
         await state.clear()
         return
@@ -114,6 +141,7 @@ async def receive_post(message: Message, state: FSMContext):
 @dp.callback_query(F.data == 'send_post')
 async def cb_send_post(callback: CallbackQuery):
     if await database.check_ban(callback.from_user.id):
+        logger.warning('[ПОСТ] заблокированный пользователь при отправке: %s', fmt_user(callback.from_user))
         await callback.message.answer(BAN_TEXT)
         return
     mod_buttons = InlineKeyboardMarkup(
@@ -123,11 +151,18 @@ async def cb_send_post(callback: CallbackQuery):
             InlineKeyboardButton(text='❌', callback_data='unpublic'),
         ]]
     )
-    await bot.copy_message(
+    sent = await bot.copy_message(
         from_chat_id=callback.from_user.id,
         chat_id=CONFIRM_CHAT,
         message_id=callback.message.message_id,
         reply_markup=mod_buttons,
+    )
+    text = callback.message.text or callback.message.caption
+    logger.info(
+        '[ПОСТ→МОДЕРАЦИЯ] mid=%d | автор: %s | текст: "%s"',
+        sent.message_id,
+        fmt_user(callback.from_user),
+        fmt_text(text),
     )
     await callback.answer('Сообщение отправлено на модерацию', show_alert=True)
     await callback.message.edit_reply_markup()
@@ -140,11 +175,21 @@ async def cb_public(callback: CallbackQuery):
         chat_id=CHANNEL,
         message_id=callback.message.message_id,
     )
+    logger.info(
+        '[ПОСТ→КАНАЛ] mid=%d | одобрил: %s',
+        callback.message.message_id,
+        fmt_user(callback.from_user),
+    )
     await callback.message.edit_reply_markup()
 
 
 @dp.callback_query(F.data == 'unpublic')
 async def cb_unpublic(callback: CallbackQuery):
+    logger.info(
+        '[ПОСТ→ОТКЛОНЁН] mid=%d | модератор: %s',
+        callback.message.message_id,
+        fmt_user(callback.from_user),
+    )
     await callback.message.edit_reply_markup()
 
 
@@ -152,6 +197,12 @@ async def cb_unpublic(callback: CallbackQuery):
 async def cb_ban(callback: CallbackQuery):
     user_id = int(callback.data.split('_', 1)[1])
     await database.ban(user_id)
+    logger.warning(
+        '[БАН] mid=%d | забанен user_id=%d | модератор: %s',
+        callback.message.message_id,
+        user_id,
+        fmt_user(callback.from_user),
+    )
     await callback.answer(f'Автор сообщения забанен. ID: {user_id}', show_alert=True)
     await callback.message.edit_reply_markup()
 
@@ -161,7 +212,9 @@ async def cb_ban(callback: CallbackQuery):
 @dp.message(Command('broadcast'))
 async def cmd_broadcast(message: Message, state: FSMContext):
     if message.from_user.id not in ADMINS:
+        logger.warning('[РАССЫЛКА] отказ в доступе: %s', fmt_user(message.from_user))
         return
+    logger.info('[РАССЫЛКА] начало составления: %s', fmt_user(message.from_user))
     await message.answer('Напиши объявление')
     await state.set_state(Form.broadcast)
 
@@ -188,6 +241,11 @@ async def cb_confirm_broadcast(callback: CallbackQuery):
     if callback.from_user.id not in ADMINS:
         return
     users = await database.all_users()
+    logger.info(
+        '[РАССЫЛКА→СТАРТ] запустил: %s | получателей: %d',
+        fmt_user(callback.from_user),
+        len(users),
+    )
     msg = await callback.message.answer('Рассылка начата...')
     await callback.message.edit_reply_markup()
     sent = 0
@@ -201,7 +259,13 @@ async def cb_confirm_broadcast(callback: CallbackQuery):
             sent += 1
             await asyncio.sleep(0.05)
         except Exception as e:
-            logger.warning('Broadcast skip %s: %s', user, e)
+            logger.warning('[РАССЫЛКА] пропуск user_id=%d: %s', user, e)
+    logger.info(
+        '[РАССЫЛКА→ИТОГ] доставлено: %d/%d | запустил: %s',
+        sent,
+        len(users),
+        fmt_user(callback.from_user),
+    )
     await msg.edit_text(f'Рассылка завершена. Доставлено: {sent}/{len(users)}')
 
 
@@ -226,7 +290,9 @@ else:
 
 async def on_startup():
     await database.init_db()
-    logger.info('БД инициализирована')
+    logger.info('=' * 60)
+    logger.info('БОТ ЗАПУЩЕН | IS_HOLIDAY=%s', IS_HOLIDAY)
+    logger.info('=' * 60)
 
 
 if __name__ == '__main__':

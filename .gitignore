@@ -4,3 +4,6 @@ database.db
 nohup.out
 .env
 dev/
+pictures/
+Пользователи.xlsx
+__pycache__/

@@ -1,57 +1,76 @@
-import json
 import sqlite3
+
+import aiosqlite
 import pandas as pd
 
-con = sqlite3.connect('database.db')
-cursor = con.cursor()
+DB_PATH = 'database.db'
 
 
-def start_command(user_id):
-    if not (user_id,) in cursor.execute('SELECT user_id FROM user_info').fetchall():
-        cursor.execute(f"INSERT INTO 'user_info'(user_id) VALUES('{user_id}')")
-        con.commit()
+async def init_db() -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_info (
+                user_id  INTEGER PRIMARY KEY,
+                username TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS ban (
+                id       INTEGER PRIMARY KEY,
+                username TEXT
+            )
+        """)
+        await db.commit()
 
 
-def new_broadcast():
-    last = cursor.execute(f'SELECT id FROM broadcast').fetchall()[-1][0] + 1
-    cursor.execute(f"INSERT INTO 'broadcast'(id) VALUES({last})")
-    cursor.execute(f"CREATE TABLE '{last}'(user_id INT)")
-    con.commit()
-
-    return last
-
-
-def export_sheet():
-    df = pd.read_sql_query("SELECT * FROM user_info", sqlite3.connect('database.db'))
-    df.to_excel('Пользователи.xlsx')
-
-
-def all_users():
-    return [i[0] for i in cursor.execute(f'SELECT user_id FROM user_info').fetchall()]
+async def upsert_user(user_id: int, username: str | None) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO user_info(user_id) VALUES(?)",
+            (user_id,),
+        )
+        await db.execute(
+            "UPDATE user_info SET username = ? WHERE user_id = ?",
+            (username, user_id),
+        )
+        await db.commit()
 
 
-def set_username(user_id, username):
-    cursor.execute(f'UPDATE user_info SET username = "{username}" WHERE user_id = {user_id}')
-    con.commit()
+async def all_users() -> list[int]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM user_info") as cursor:
+            rows = await cursor.fetchall()
+    return [row[0] for row in rows]
 
 
-def ban(user_id):
-    username = cursor.execute(f'SELECT username FROM user_info WHERE user_id = "{user_id}"').fetchall()[0][0]
-
-    cursor.execute(f'INSERT INTO ban("id", "username") VALUES({user_id}, "{username}")')
-    con.commit()
-
-
-def check_ban(user_id):
-    a = cursor.execute(f'SELECT id FROM ban WHERE id = {user_id}').fetchall()
-    return bool(a)
-
-
-def unban(user_id):
-    cursor.execute(f'DELETE FROM ban WHERE id = {user_id}')
-    con.commit()
+async def ban(user_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT username FROM user_info WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        username = row[0] if row else None
+        await db.execute(
+            "INSERT OR IGNORE INTO ban(id, username) VALUES(?, ?)",
+            (user_id, username),
+        )
+        await db.commit()
 
 
-if __name__ == '__main__':
-    pass
-    # print(send_custom(1132908805))
+async def unban(user_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM ban WHERE id = ?", (user_id,))
+        await db.commit()
+
+
+async def check_ban(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM ban WHERE id = ?", (user_id,)
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
+def export_sheet() -> None:
+    df = pd.read_sql_query("SELECT * FROM user_info", sqlite3.connect(DB_PATH))
+    df.to_excel('Пользователи.xlsx', index=False)
